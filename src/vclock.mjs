@@ -2,6 +2,19 @@
 //
 // 对外契约见 README。`compare` 已实现；`merge`、偏序判定与序列化为本次待补能力。
 
+import { Buffer } from 'node:buffer';
+
+function asClock(value, label) {
+  if (!(value instanceof VectorClock)) {
+    throw new TypeError(`非法的 VectorClock 入参：${label}`);
+  }
+  return value;
+}
+
+function compareUtf8Bytes(a, b) {
+  return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+}
+
 export class VectorClock {
   constructor(entries = {}) {
     this._entries = Object.create(null);
@@ -70,7 +83,19 @@ export class VectorClock {
  * @returns {VectorClock}
  */
 export function merge(a, b) {
-  throw new Error('not implemented');
+  const left = asClock(a, 'a');
+  const right = asClock(b, 'b');
+  const result = new VectorClock();
+  for (const node of left.nodes()) {
+    result.set(node, left.get(node));
+  }
+  for (const node of right.nodes()) {
+    const value = right.get(node);
+    if (!result.has(node) || value > result.get(node)) {
+      result.set(node, value);
+    }
+  }
+  return result;
 }
 
 /**
@@ -80,7 +105,7 @@ export function merge(a, b) {
  * @returns {boolean}
  */
 export function happensBefore(a, b) {
-  throw new Error('not implemented');
+  return asClock(a, 'a').compare(asClock(b, 'b')) === 'before';
 }
 
 /**
@@ -90,7 +115,7 @@ export function happensBefore(a, b) {
  * @returns {boolean}
  */
 export function concurrent(a, b) {
-  throw new Error('not implemented');
+  return asClock(a, 'a').compare(asClock(b, 'b')) === 'concurrent';
 }
 
 /**
@@ -100,7 +125,7 @@ export function concurrent(a, b) {
  * @returns {boolean}
  */
 export function equals(a, b) {
-  throw new Error('not implemented');
+  return asClock(a, 'a').compare(asClock(b, 'b')) === 'equal';
 }
 
 /**
@@ -109,7 +134,12 @@ export function equals(a, b) {
  * @returns {string}
  */
 export function serialize(clock) {
-  throw new Error('not implemented');
+  const entries = asClock(clock, 'clock')._entries;
+  const parts = [];
+  for (const node of Object.keys(entries).sort(compareUtf8Bytes)) {
+    parts.push(`${JSON.stringify(node)}:${String(entries[node])}`);
+  }
+  return `{${parts.join(',')}}`;
 }
 
 /**
@@ -118,5 +148,21 @@ export function serialize(clock) {
  * @returns {VectorClock}
  */
 export function deserialize(text) {
-  throw new Error('not implemented');
+  if (typeof text !== 'string') {
+    throw new TypeError('deserialize 只接受字符串');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new SyntaxError(`非法的序列化时钟：${error.message}`);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new TypeError('序列化时钟必须是 JSON 对象');
+  }
+  const result = new VectorClock();
+  for (const key of Object.keys(parsed)) {
+    result.set(key, parsed[key]);
+  }
+  return result;
 }
