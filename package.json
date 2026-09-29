@@ -1,0 +1,11 @@
+{
+  "name": "vclock",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js 22 vector clock with merge and partial order.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node check/check.mjs"
+  }
+}
