@@ -1,6 +1,21 @@
 // vclock —— Node.js 22 向量时钟。
 //
-// 对外契约见 README。`compare` 已实现；`merge`、偏序判定与序列化为本次待补能力。
+// 对外契约见 README。仅使用 `node:` 内置模块；不读取时间、随机源或环境状态。
+
+import { Buffer } from 'node:buffer';
+
+// 按 UTF-8 字节序升序排列节点名。序列化与节点枚举都走这里，
+// 保证输出顺序与对象键的迭代顺序无关。
+function bytewiseSorted(nodes) {
+  return [...nodes].sort((x, y) => Buffer.compare(Buffer.from(x), Buffer.from(y)));
+}
+
+function assertClock(value, label) {
+  if (!(value instanceof VectorClock)) {
+    throw new TypeError(`${label} 必须是 VectorClock`);
+  }
+  return value;
+}
 
 export class VectorClock {
   constructor(entries = {}) {
@@ -33,7 +48,7 @@ export class VectorClock {
   }
 
   nodes() {
-    return Object.keys(this._entries).sort();
+    return bytewiseSorted(Object.keys(this._entries));
   }
 
   toObject() {
@@ -70,7 +85,18 @@ export class VectorClock {
  * @returns {VectorClock}
  */
 export function merge(a, b) {
-  throw new Error('not implemented');
+  assertClock(a, 'merge 的第一个参数');
+  assertClock(b, 'merge 的第二个参数');
+  const out = new VectorClock();
+  for (const node of bytewiseSorted(new Set([...a.nodes(), ...b.nodes()]))) {
+    const inA = a.has(node);
+    const inB = b.has(node);
+    // 合并取并集：节点只在一侧出现时直接取该侧的值（含负数），
+    // 不把“缺失”当成 0 参与取大；两侧都存在时才比较取最大值。
+    const value = !inB ? a.get(node) : !inA ? b.get(node) : Math.max(a.get(node), b.get(node));
+    out.set(node, value);
+  }
+  return out;
 }
 
 /**
@@ -80,7 +106,8 @@ export function merge(a, b) {
  * @returns {boolean}
  */
 export function happensBefore(a, b) {
-  throw new Error('not implemented');
+  return assertClock(a, 'happensBefore 的第一个参数')
+    .compare(assertClock(b, 'happensBefore 的第二个参数')) === 'before';
 }
 
 /**
@@ -90,7 +117,8 @@ export function happensBefore(a, b) {
  * @returns {boolean}
  */
 export function concurrent(a, b) {
-  throw new Error('not implemented');
+  return assertClock(a, 'concurrent 的第一个参数')
+    .compare(assertClock(b, 'concurrent 的第二个参数')) === 'concurrent';
 }
 
 /**
@@ -100,7 +128,8 @@ export function concurrent(a, b) {
  * @returns {boolean}
  */
 export function equals(a, b) {
-  throw new Error('not implemented');
+  return assertClock(a, 'equals 的第一个参数')
+    .compare(assertClock(b, 'equals 的第二个参数')) === 'equal';
 }
 
 /**
@@ -109,7 +138,12 @@ export function equals(a, b) {
  * @returns {string}
  */
 export function serialize(clock) {
-  throw new Error('not implemented');
+  assertClock(clock, 'serialize 的参数');
+  const parts = [];
+  for (const node of clock.nodes()) {
+    parts.push(`${JSON.stringify(node)}:${JSON.stringify(clock.get(node))}`);
+  }
+  return `{${parts.join(',')}}`;
 }
 
 /**
@@ -118,5 +152,21 @@ export function serialize(clock) {
  * @returns {VectorClock}
  */
 export function deserialize(text) {
-  throw new Error('not implemented');
+  if (typeof text !== 'string') {
+    throw new TypeError('deserialize 的参数必须是字符串');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    throw new TypeError('deserialize 的参数不是合法 JSON');
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new TypeError('deserialize 的内容必须是 JSON 对象');
+  }
+  const clock = new VectorClock();
+  for (const key of Object.keys(parsed)) {
+    clock.set(key, parsed[key]);
+  }
+  return clock;
 }
